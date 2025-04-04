@@ -275,10 +275,10 @@
 
               // update overall
               // First subtract out what was previously reported, then add what's new
-              let previouslyUploaded = (xhr as any)._prevBytes || 0;
+              let previouslyUploaded = xhr._prevBytes || 0;
               let newUploaded = event.loaded - previouslyUploaded;
               totalBytesUploaded += newUploaded;
-              (xhr as any)._prevBytes = event.loaded;
+              xhr._prevBytes = event.loaded;
 
               const overallPerc = Math.round((totalBytesUploaded / totalBytes) * 100);
               overallProgress.style.width = `${overallPerc}%`;
