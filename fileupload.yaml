@@ -1,0 +1,447 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Automated deployment: S3, Lambda, API Gateway, and Amplify (GitHub)
+  in ap-south-1 using an explicit "main" branch with an initial automated build
+  triggered via a custom resource. Includes automatic CORS enablement.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Description: 'GitHub repository in the format "owner/repo" (e.g., USER/REPO)'
+
+  GitHubAccessToken:
+    Type: String
+    NoEcho: true
+    Description: 'GitHub Personal Access Token with repo + admin:repo_hook scopes'
+
+  UploadPassword:
+    Type: String
+    NoEcho: true
+    Description: 'Password for file uploads'
+
+  S3BucketName:
+    Type: String
+    Description: 'S3 bucket name for storing uploaded files'
+
+  LambdaCodeBucket:
+    Type: String
+    Description: 'S3 bucket where Lambda code (lambda.zip) is stored'
+
+  LambdaCodeKey:
+    Type: String
+    Description: 'S3 object key for Lambda code (lambda.zip)'
+
+  CompanyName:
+    Type: String
+    Description: 'The company name to be displayed in the web app'
+    Default: "AI Guru"
+
+  CustomDomainName:
+    Type: String
+    Description: 'Domain name for the app (e.g., mydomain.com)'
+
+  CustomDomainPrefix:
+    Type: String
+    Description: 'Base name for the app subdomain (e.g., akshay)'
+    Default: "fileupload"
+
+Resources:
+  ## 1. S3 Bucket for File Storage
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref S3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  ## 2. IAM Role for Lambda Execution
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}'
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  ## 3. Lambda Function for File Upload
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: S3Bucket
+    Properties:
+      # Lambda function name is computed by appending "Lambda" to the CustomDomainPrefix value.
+      FunctionName: !Sub "${CustomDomainPrefix}Lambda"
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      Environment:
+        Variables:
+          UPLOAD_PASSWORD: !Ref UploadPassword
+          BUCKET_NAME: !Ref S3BucketName
+
+  ## 3a. Lambda Permission for API Gateway
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref LambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*/*"
+
+  ## 4. API Gateway with CORS enabled at the API level
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: FileUploadAPI
+      Description: API Gateway for file upload service with CORS support
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ## Gateway Responses for CORS (4XX and 5XX)
+  ApiGateway4XXResponse:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+
+  ApiGateway5XXResponse:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+
+  ## API Gateway Resource for File Upload
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: upload
+
+  ## 4a. POST Method with AWS_PROXY integration
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionArn}/invocations"
+          - { LambdaFunctionArn: !GetAtt LambdaFunction.Arn }
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+
+  ## 4b. OPTIONS Method for CORS preflight
+  ApiGatewayOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_MATCH
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            ResponseTemplates:
+              application/json: '{}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+
+  ## 4c. Deployment & Stage
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiGatewayMethod
+      - ApiGatewayOptionsMethod
+      - ApiGateway4XXResponse
+      - ApiGateway5XXResponse
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: prod
+
+  ## 5. IAM Role for Amplify Deployment
+  AmplifyServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - amplify.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AmplifyAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - amplify:StartJob
+                  - amplify:CreateDeployment
+                  - amplify:StartDeployment
+                  - amplify:CreateBranch
+                  - amplify:ListBranches
+                  - amplify:GetBranch
+                  - amplify:UpdateBranch
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: "*"
+
+  ## 6. Amplify App
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: FileUploadApp
+      Repository: !Ref GitHubRepo
+      AccessToken: !Ref GitHubAccessToken
+      IAMServiceRole: !GetAtt AmplifyServiceRole.Arn
+      EnableBranchAutoDeletion: true
+      BuildSpec: |
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - echo "No build needed at app level"
+            build:
+              commands:
+                - echo "No build needed at app level"
+          artifacts:
+            baseDirectory: .
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**/*
+
+  ## 7. Amplify Branch for "main" with auto-build enabled
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    DependsOn: AmplifyApp
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: "main"
+      EnableAutoBuild: true
+      Stage: PRODUCTION
+      Framework: NONE
+      BuildSpec: |
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - echo "Injecting API URL and Company Name into index.html"
+                - sed -i "s|%%API_URL%%|$API_URL|g" index.html
+                - sed -i "s|%%COMPANY_NAME%%|$COMPANY_NAME|g" index.html
+                - echo "Starting build for main branch..."
+                - python --version
+                - if [ -f requirements.txt ]; then pip install -r requirements.txt; else echo "No requirements.txt found"; fi
+            build:
+              commands:
+                - echo "Build completed."
+          artifacts:
+            baseDirectory: .
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**/*
+              - .venv/**/*
+      EnvironmentVariables:
+        - Name: API_URL
+          Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/upload'
+        - Name: S3_BUCKET
+          Value: !Ref S3BucketName
+        - Name: COMPANY_NAME
+          Value: !Ref CompanyName
+
+  ## 8. IAM Role for Deployment Trigger Function
+  DeploymentTriggerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: TriggerDeploymentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - amplify:StartJob
+                Resource: "*"
+
+  ## 9. Lambda Function to Trigger Amplify Deployment via start_job
+  TriggerDeploymentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt DeploymentTriggerLambdaRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          import time
+
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+          def send(event, context, responseStatus, responseData, physicalResourceId=None, noEcho=False):
+              responseUrl = event['ResponseURL']
+              responseBody = {
+                  'Status': responseStatus,
+                  'Reason': 'See details in CloudWatch Log Stream: ' + context.log_stream_name,
+                  'PhysicalResourceId': physicalResourceId or context.log_stream_name,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'NoEcho': noEcho,
+                  'Data': responseData
+              }
+              json_responseBody = json.dumps(responseBody)
+              headers = {
+                  'content-type': '',
+                  'content-length': str(len(json_responseBody))
+              }
+              http = urllib3.PoolManager()
+              http.request('PUT', responseUrl, body=json_responseBody, headers=headers)
+
+          def lambda_handler(event, context):
+              physical_id = 'TriggerAmplifyDeployment'
+              try:
+                  if event['RequestType'] == 'Create':
+                      app_id = event['ResourceProperties']['AppId']
+                      branch_name = event['ResourceProperties']['BranchName']
+                      client = boto3.client('amplify')
+                      # Wait for branch to be ready (retry a few times)
+                      for i in range(5):
+                          try:
+                              branch = client.get_branch(appId=app_id, branchName=branch_name)
+                              if branch:
+                                  break
+                          except Exception as e:
+                              time.sleep(10)
+                      # Trigger a new build job using start_job with jobType RELEASE
+                      client.start_job(
+                          appId=app_id,
+                          branchName=branch_name,
+                          jobType='RELEASE'
+                      )
+                      send(event, context, SUCCESS, {'Message': 'Deployment job started'}, physical_id)
+                  else:
+                      send(event, context, SUCCESS, {'Message': 'No action required'}, physical_id)
+              except Exception as e:
+                  send(event, context, FAILED, {'Message': str(e)}, physical_id)
+
+  ## 10. Custom Resource to Trigger Deployment Automatically
+  TriggerDeploymentCustomResource:
+    Type: Custom::TriggerDeployment
+    DependsOn: AmplifyBranch
+    Properties:
+      ServiceToken: !GetAtt TriggerDeploymentFunction.Arn
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: "main"
+
+  ## 11. Amplify Custom Domain using the provided CustomDomainPrefix (without "Lambda")
+  AmplifyDomain:
+    Type: AWS::Amplify::Domain
+    DependsOn: AmplifyBranch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      DomainName: !Ref CustomDomainName
+      SubDomainSettings:
+        - Prefix: !Ref CustomDomainPrefix
+          BranchName: "main"
+      EnableAutoSubDomain: false
+
+Outputs:
+  S3BucketName:
+    Value: !Ref S3BucketName
+    Description: 'S3 Bucket for file uploads'
+  LambdaFunctionArn:
+    Value: !GetAtt LambdaFunction.Arn
+    Description: 'Lambda function ARN'
+  ApiGatewayInvokeUrl:
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod/upload'
+    Description: 'API Gateway invoke URL for file uploads'
+  AmplifyAppUrl:
+    Value: !Sub 'https://main.${AmplifyApp.DefaultDomain}'
+    Description: 'Amplify app URL for the main branch (auto-deploy triggered)'
+  CustomDomainUrl:
+    Value: !Sub 'https://${CustomDomainPrefix}.${CustomDomainName}'
+    Description: 'Custom domain URL for the app'
