@@ -1,28 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Secure File Upload %%COMPANY_NAME%%</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <!-- Logo -->
   <div class="absolute top-4 left-8">
     <img src="https://aigurupublic.s3.us-east-1.amazonaws.com/snapline-logo.png" alt="%%COMPANY_NAME%% Logo" class="h-16">
   </div>
 
+  <!-- Main Content -->
   <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
     <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">Secure File Upload %%COMPANY_NAME%%</h1>
-
+    
+    <!-- Password Input -->
     <div class="mb-6">
       <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
       <input type="password" id="password" placeholder="Enter your password" class="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
     </div>
 
+    <!-- File Upload Section -->
     <div class="mb-6">
       <label class="block text-sm font-medium text-gray-700">Upload Files</label>
-
-      <!-- File types toggle -->
+      
+      <!-- Collapsible File Types Information -->
       <div class="mb-3">
         <button type="button" id="fileTypesToggle" class="flex w-full justify-between items-center p-2 text-sm text-left font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100 transition-colors">
           <div class="flex items-center">
@@ -43,16 +47,30 @@
             <li>Email: EML, MSG</li>
             <li>Images: JPG, PNG, GIF</li>
           </ul>
-          <p class="text-sm text-yellow-700 mt-2"><strong>Not Allowed:</strong> ZIP files</p>
         </div>
       </div>
-
+      
+      <!-- ZIP file warning notice -->
+      <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-3">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+            </svg>
+          </div>
+          <div class="ml-3">
+            <p class="text-sm text-yellow-700"><strong>Note:</strong> ZIP files are not allowed.</p>
+          </div>
+        </div>
+      </div>
+      
       <div id="dropZone" class="mt-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-md p-6 cursor-pointer hover:border-blue-500 transition-colors">
         <span id="dropText" class="text-gray-500">Drag & drop files here or click to upload</span>
         <input type="file" id="fileInput" multiple class="hidden" />
       </div>
     </div>
 
+    <!-- Progress Bar -->
     <div class="mb-4">
       <label class="block text-sm font-medium text-gray-700">Overall Progress</label>
       <div class="w-full bg-gray-200 rounded-full h-2.5">
@@ -61,10 +79,13 @@
       <p id="overallProgressText" class="text-sm text-gray-600 mt-1">0%</p>
     </div>
 
+    <!-- Individual File Progress -->
     <div id="individualProgressContainer" class="mb-6"></div>
 
+    <!-- Upload Button -->
     <button onclick="uploadFiles()" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">Upload Files</button>
 
+    <!-- Loading Spinner -->
     <div id="loading" class="hidden mt-4 text-center">
       <svg class="animate-spin h-5 w-5 text-blue-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -72,7 +93,10 @@
       </svg>
     </div>
 
+    <!-- Status Message -->
     <p id="status" class="mt-4 text-center text-sm"></p>
+
+    <!-- Uploaded Files List -->
     <div id="uploadedFilesContainer" class="mt-6 hidden">
       <h2 class="text-lg font-semibold text-gray-800">Uploaded Files</h2>
       <ul id="uploadedFilesList" class="mt-2 list-disc list-inside text-gray-700"></ul>
@@ -80,8 +104,9 @@
   </div>
 
   <script>
+    // The API URL will be injected during the build process.
     const apiUrl = "%%API_URL%%";
-
+    
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const dropText = document.getElementById('dropText');
@@ -90,15 +115,21 @@
     const overallProgress = document.getElementById('overallProgress');
     const overallProgressText = document.getElementById('overallProgressText');
     const individualProgressContainer = document.getElementById('individualProgressContainer');
-
+    const uploadedFilesContainer = document.getElementById('uploadedFilesContainer');
+    const uploadedFilesList = document.getElementById('uploadedFilesList');
+    
+    // Set up file types dropdown
     const fileTypesToggle = document.getElementById('fileTypesToggle');
     const fileTypesContent = document.getElementById('fileTypesContent');
     const fileTypesArrow = document.getElementById('fileTypesArrow');
-
+    
     fileTypesToggle.addEventListener('click', () => {
       fileTypesContent.classList.toggle('hidden');
       fileTypesArrow.classList.toggle('rotate-180');
     });
+
+    // List of allowed file extensions
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv', '.eml', '.msg', '.jpg', '.jpeg', '.png', '.gif'];
 
     dropZone.addEventListener('dragover', (e) => {
       e.preventDefault();
@@ -120,87 +151,165 @@
     fileInput.addEventListener('change', () => updateDropText());
 
     function updateDropText() {
-      dropText.textContent = fileInput.files.length > 0
-        ? `${fileInput.files.length} file(s) selected`
-        : 'Drag & drop files here or click to upload';
+      dropText.textContent = fileInput.files.length > 0 ? `${fileInput.files.length} file(s) selected` : 'Drag & drop files here or click to upload';
     }
 
     function checkFileType(fileName) {
-      const allowedExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv', '.eml', '.msg', '.jpg', '.jpeg', '.png', '.gif'];
-      const lower = fileName.toLowerCase();
-      if (lower.endsWith('.zip')) return { allowed: false, message: 'ZIP files are not allowed!' };
-      for (const ext of allowedExtensions) {
-        if (lower.endsWith(ext)) return { allowed: true };
+      const lowerFileName = fileName.toLowerCase();
+      
+      // Check if file is a ZIP
+      if (lowerFileName.endsWith('.zip')) {
+        return { allowed: false, message: 'ZIP files are not allowed!' };
       }
-      return { allowed: false, message: 'Unsupported file type!' };
+      
+      // Check if file has an allowed extension
+      for (const ext of allowedExtensions) {
+        if (lowerFileName.endsWith(ext)) {
+          return { allowed: true };
+        }
+      }
+      
+      return { allowed: false, message: 'File type not allowed! Please upload only supported file types.' };
     }
 
-    function updateOverallProgress(done, total) {
-      const pct = Math.round((done / total) * 100);
-      overallProgress.style.width = `${pct}%`;
-      overallProgressText.textContent = `${pct}%`;
+    function updateOverallProgress(uploadedCount, totalFiles) {
+      const progress = Math.round((uploadedCount / totalFiles) * 100);
+      overallProgress.style.width = `${progress}%`;
+      overallProgressText.textContent = `${progress}%`;
     }
 
     async function uploadFiles() {
       const password = document.getElementById('password').value;
       const files = fileInput.files;
-      if (!files.length) return;
 
+      if (files.length === 0) {
+        status.textContent = 'No files selected!';
+        status.classList.remove('text-green-500', 'text-blue-500');
+        status.classList.add('text-red-500');
+        return;
+      }
+
+      if (!password) {
+        status.textContent = 'Please enter a password!';
+        status.classList.remove('text-green-500', 'text-blue-500');
+        status.classList.add('text-red-500');
+        return;
+      }
+
+      // Check file types
       const metadata = [];
-      for (let file of files) {
-        const check = checkFileType(file.name);
-        if (!check.allowed) {
-          status.textContent = check.message;
+      for (let i = 0; i < files.length; i++) {
+        const fileCheck = checkFileType(files[i].name);
+        if (!fileCheck.allowed) {
+          status.textContent = fileCheck.message;
+          status.classList.remove('text-green-500', 'text-blue-500');
           status.classList.add('text-red-500');
+          // Show the file types dropdown to help user
+          if (!fileTypesContent.classList.contains('hidden')) {
+            fileTypesContent.classList.remove('hidden');
+            fileTypesArrow.classList.add('rotate-180');
+          }
           return;
         }
-        metadata.push({ name: file.name, type: file.type });
+        metadata.push({ name: files[i].name, type: files[i].type });
       }
 
       status.textContent = 'Getting upload URLs...';
+      status.classList.remove('text-red-500', 'text-green-500');
+      status.classList.add('text-blue-500');
       loading.classList.remove('hidden');
 
-      const presignedRes = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, files: metadata })
-      });
-      const presigned = await presignedRes.json();
+      try {
+        // Get upload URLs from the server
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, files: metadata })
+        });
+        
+        const result = await res.json();
+        
+        if (!res.ok) {
+          throw new Error(result.message || 'Error getting upload URLs');
+        }
 
-      const uploadResults = presigned.body.files;
-      let uploadedCount = 0;
+        const uploadResults = result.body.files;
+        let uploadedCount = 0;
 
-      individualProgressContainer.innerHTML = '';
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const { url, name, key } = uploadResults[i];
+        // Clear previous progress
+        individualProgressContainer.innerHTML = '';
+        
+        // Create progress bars for each file
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const { url, name, key } = uploadResults[i];
 
-        const bar = document.createElement('div');
-        bar.classList.add('mb-2');
-        bar.innerHTML = `<label class="text-sm">${file.name}</label><div class="w-full bg-gray-200 rounded-full h-2.5"><div class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div></div>`;
-        individualProgressContainer.appendChild(bar);
-        const inner = bar.querySelector('.bg-green-500');
+          const progressBar = document.createElement('div');
+          progressBar.classList.add('mb-2');
+          progressBar.innerHTML = `
+            <label class="text-sm">${file.name}</label>
+            <div class="w-full bg-gray-200 rounded-full h-2.5">
+              <div class="bg-green-500 h-2.5 rounded-full" style="width: 0%"></div>
+            </div>`;
+          individualProgressContainer.appendChild(progressBar);
+          const innerBar = progressBar.querySelector('.bg-green-500');
 
-        await fetch(url, {
-          method: 'PUT',
-          headers: { 'Content-Type': file.type },
-          body: file
+          try {
+            // Upload directly to the provided URL
+            await fetch(url, {
+              method: 'PUT',
+              headers: { 'Content-Type': file.type },
+              body: file
+            });
+            
+            innerBar.style.width = '100%';
+            updateOverallProgress(++uploadedCount, files.length);
+          } catch (error) {
+            status.textContent = `Error uploading ${file.name}`;
+            status.classList.remove('text-green-500', 'text-blue-500');
+            status.classList.add('text-red-500');
+            throw error;
+          }
+        }
+
+        // Notify the server that all files have been uploaded
+        await fetch(apiUrl.replace(/\/?$/, '/notify'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            password,
+            uploadedFiles: uploadResults.map(f => ({ name: f.name, s3Key: f.key }))
+          })
         });
 
-        inner.style.width = '100%';
-        updateOverallProgress(++uploadedCount, files.length);
+        // Display success message
+        status.textContent = 'All files uploaded successfully!';
+        status.classList.remove('text-red-500', 'text-blue-500');
+        status.classList.add('text-green-500');
+        
+        // Display list of uploaded files
+        displayUploadedFiles(uploadResults);
+        
+      } catch (error) {
+        console.error('Upload error:', error);
+        if (!status.classList.contains('text-red-500')) {
+          status.textContent = 'Error uploading files. Please try again.';
+          status.classList.remove('text-green-500', 'text-blue-500');
+          status.classList.add('text-red-500');
+        }
+      } finally {
+        loading.classList.add('hidden');
       }
+    }
 
-      status.textContent = 'All files uploaded!';
-      status.classList.add('text-green-500');
-      loading.classList.add('hidden');
-
-      await fetch(apiUrl + '/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password, uploadedFiles: uploadResults.map(f => ({ name: f.name, s3Key: f.key })) })
+    function displayUploadedFiles(files) {
+      uploadedFilesList.innerHTML = '';
+      files.forEach(file => {
+        const listItem = document.createElement('li');
+        listItem.textContent = file.name;
+        uploadedFilesList.appendChild(listItem);
       });
+      uploadedFilesContainer.classList.remove('hidden');
     }
   </script>
 </body>
-</html>
