@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Secure File Upload %%COMPANY_NAME%%</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="icon" href="data:,">
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen">
   <!-- Logo -->
@@ -232,8 +233,12 @@
         if (!res.ok) {
           throw new Error(result.message || 'Error getting upload URLs');
         }
-
-        const uploadResults = result.body.files;
+        
+        // Fix: Parse the body if it's a string
+        const resultBody = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+        
+        // Now use resultBody instead of result.body
+        const uploadResults = resultBody.files;
         let uploadedCount = 0;
 
         // Clear previous progress
@@ -313,3 +318,4 @@
     }
   </script>
 </body>
+</html>
